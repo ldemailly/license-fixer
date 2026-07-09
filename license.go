@@ -1,5 +1,3 @@
-// Package main implements logic for detecting and fixing unfilled Apache
-// License copyright placeholders.
 package main
 
 import "strings"

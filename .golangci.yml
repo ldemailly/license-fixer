@@ -4,6 +4,8 @@
 version: "2"
 linters:
   default: all
+  enable:
+    - gomodguard_v2
   disable:
     - exhaustruct # seems like a good idea at first but actually a pain and go does have zero values for a reason.
     - gochecknoglobals
@@ -27,6 +29,7 @@ linters:
     - forcetypeassert
     - ireturn
     - depguard
+    - gomodguard
     # newer bad ones:
     - wsl
     - wsl_v5
