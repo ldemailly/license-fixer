@@ -114,3 +114,10 @@ someone else's repo), the tool will automatically:
 3. Commit the corrected `LICENSE`
 4. Open a **cross-repository pull request** from `yourlogin:fix-license-copyright`
    to the upstream default branch
+
+
+# WARNING
+
+This was 99% AI generated to solve https://github.com/fortio/template/issues/12
+
+Quality doesn't reflect my golang skills
