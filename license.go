@@ -1,5 +1,3 @@
-// Package main implements logic for detecting and fixing unfilled Apache
-// License copyright placeholders.
 package main
 
 import "strings"
@@ -29,5 +27,5 @@ func fixedLicense(content string, copyrights []string) string {
 		sb.WriteString("   Copyright ")
 		sb.WriteString(c)
 	}
-	return strings.Replace(content, copyrightTemplate, sb.String(), -1)
+	return strings.ReplaceAll(content, copyrightTemplate, sb.String())
 }
