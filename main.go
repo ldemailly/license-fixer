@@ -215,9 +215,19 @@ func (c *checker) ensureBranch(owner, repo, baseBranch string) (string, string, 
 	if createErr == nil {
 		return owner, repo, nil
 	}
-	// Branch already exists – treat as success.
-	if strings.Contains(createErr.Error(), "Reference already exists") {
-		return owner, repo, nil
+
+	// Treat 422 as "already exists" and only fork on permission-related failures.
+	if er, ok := createErr.(*github.ErrorResponse); ok && er.Response != nil {
+		switch er.Response.StatusCode {
+		case 422:
+			return owner, repo, nil
+		case 403, 404:
+			// fall through to fork
+		default:
+			return "", "", fmt.Errorf("creating branch ref: %w", createErr)
+		}
+	} else {
+		return "", "", fmt.Errorf("creating branch ref: %w", createErr)
 	}
 
 	// We likely lack write access. Fork the repo and try again.
