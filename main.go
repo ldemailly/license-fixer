@@ -281,6 +281,9 @@ func (c *checker) resolveForkError(
 		return nil, fmt.Errorf("fork already exists but could not determine current user: %w", uerr)
 	}
 	fork, _, forkErr := c.client.Repositories.Get(context.Background(), me.GetLogin(), repo)
+	if forkErr != nil {
+		return nil, fmt.Errorf("getting fork from user: %w", forkErr)
+	}
 	return fork, forkErr
 }
 
