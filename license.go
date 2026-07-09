@@ -29,5 +29,5 @@ func fixedLicense(content string, copyrights []string) string {
 		sb.WriteString("   Copyright ")
 		sb.WriteString(c)
 	}
-	return strings.Replace(content, copyrightTemplate, sb.String(), -1)
+	return strings.ReplaceAll(content, copyrightTemplate, sb.String())
 }

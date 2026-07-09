@@ -1,29 +1,11 @@
-// license-fixer checks Apache LICENSE files in GitHub repositories and
-// optionally fixes the unfilled copyright placeholder.
-//
-// Usage:
-//
-//	license-fixer [flags] <owner/repo|owner|org>
-//
-// The target can be a single repository ("owner/repo"), a GitHub user, or
-// an organization. When given a user or org, all public repositories are
-// checked.
-//
-// Flags:
-//
-//	-c <copyright>    Copyright line to use for fix (repeatable).
-//	                  Example: -c "2025 Fortio Authors"
-//	-fix              Apply the fix by opening a PR.
-//	-branch <name>    Branch name for the fix (default: fix-license-copyright).
-//	-token <token>    GitHub personal access token.
-//	                  Defaults to GH_TOKEN or GITHUB_TOKEN env vars, or
-//	                  the output of `gh auth token`.
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -66,7 +48,7 @@ func githubToken(tokenFlag string) string {
 			return t
 		}
 	}
-	out, err := exec.Command("gh", "auth", "token").Output()
+	out, err := exec.CommandContext(context.Background(), "gh", "auth", "token").Output()
 	if err == nil {
 		if t := strings.TrimSpace(string(out)); t != "" {
 			return t
@@ -77,7 +59,6 @@ func githubToken(tokenFlag string) string {
 
 // checker holds the runtime state for a license-checking session.
 type checker struct {
-	ctx        context.Context
 	client     *github.Client
 	copyrights []string
 	fix        bool
@@ -91,9 +72,9 @@ func (c *checker) checkRepo(owner, repo string) {
 	fmt.Printf("Checking %s/%s\n", owner, repo)
 
 	fileContent, _, resp, err := c.client.Repositories.GetContents(
-		c.ctx, owner, repo, "LICENSE", nil)
+		context.Background(), owner, repo, "LICENSE", nil)
 	if err != nil {
-		if resp != nil && resp.StatusCode == 404 {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
 			fmt.Printf("  No LICENSE file found\n")
 			return
 		}
@@ -137,7 +118,7 @@ func (c *checker) applyFix(owner, repo string, fileContent *github.RepositoryCon
 	newContent := fixedLicense(rawContent, c.copyrights)
 
 	// Determine the default branch for the PR base.
-	repoInfo, _, err := c.client.Repositories.Get(c.ctx, owner, repo)
+	repoInfo, _, err := c.client.Repositories.Get(context.Background(), owner, repo)
 	if err != nil {
 		return fmt.Errorf("getting repo info: %w", err)
 	}
@@ -155,7 +136,7 @@ func (c *checker) applyFix(owner, repo string, fileContent *github.RepositoryCon
 	sha := fileContent.GetSHA()
 	if fixOwner != owner || fixRepo != repo {
 		forkFile, _, _, ferr := c.client.Repositories.GetContents(
-			c.ctx, fixOwner, fixRepo, "LICENSE", nil)
+			context.Background(), fixOwner, fixRepo, "LICENSE", nil)
 		if ferr != nil {
 			return fmt.Errorf("getting LICENSE from fork: %w", ferr)
 		}
@@ -164,7 +145,7 @@ func (c *checker) applyFix(owner, repo string, fileContent *github.RepositoryCon
 
 	// Commit the updated file.
 	_, _, err = c.client.Repositories.UpdateFile(
-		c.ctx, fixOwner, fixRepo, "LICENSE",
+		context.Background(), fixOwner, fixRepo, "LICENSE",
 		&github.RepositoryContentFileOptions{
 			Message: github.Ptr("Fix Apache license copyright template"),
 			Content: []byte(newContent),
@@ -181,7 +162,7 @@ func (c *checker) applyFix(owner, repo string, fileContent *github.RepositoryCon
 		head = fixOwner + ":" + c.branch
 	}
 
-	pr, _, err := c.client.PullRequests.Create(c.ctx, owner, repo, &github.NewPullRequest{
+	pr, _, err := c.client.PullRequests.Create(context.Background(), owner, repo, &github.NewPullRequest{
 		Title: github.Ptr(prTitle),
 		Head:  github.Ptr(head),
 		Base:  github.Ptr(defaultBranch),
@@ -201,7 +182,7 @@ func (c *checker) applyFix(owner, repo string, fileContent *github.RepositoryCon
 // It returns the owner and repo name where the branch was created.
 func (c *checker) ensureBranch(owner, repo, baseBranch string) (string, string, error) {
 	// Get the SHA of the tip of the base branch.
-	ref, _, err := c.client.Git.GetRef(c.ctx, owner, repo, "refs/heads/"+baseBranch)
+	ref, _, err := c.client.Git.GetRef(context.Background(), owner, repo, "refs/heads/"+baseBranch)
 	if err != nil {
 		return "", "", fmt.Errorf("getting base branch ref: %w", err)
 	}
@@ -211,17 +192,18 @@ func (c *checker) ensureBranch(owner, repo, baseBranch string) (string, string, 
 		Ref:    github.Ptr("refs/heads/" + c.branch),
 		Object: &github.GitObject{SHA: github.Ptr(tipSHA)},
 	}
-	_, _, createErr := c.client.Git.CreateRef(c.ctx, owner, repo, newRef)
+	_, _, createErr := c.client.Git.CreateRef(context.Background(), owner, repo, newRef)
 	if createErr == nil {
 		return owner, repo, nil
 	}
 
 	// Treat 422 as "already exists" and only fork on permission-related failures.
-	if er, ok := createErr.(*github.ErrorResponse); ok && er.Response != nil {
-		switch er.Response.StatusCode {
-		case 422:
+	var createErrResp *github.ErrorResponse
+	if errors.As(createErr, &createErrResp) && createErrResp.Response != nil {
+		switch createErrResp.Response.StatusCode {
+		case http.StatusUnprocessableEntity:
 			return owner, repo, nil
-		case 403, 404:
+		case http.StatusForbidden, http.StatusNotFound:
 			// fall through to fork
 		default:
 			return "", "", fmt.Errorf("creating branch ref: %w", createErr)
@@ -235,25 +217,18 @@ func (c *checker) ensureBranch(owner, repo, baseBranch string) (string, string, 
 
 	// CreateFork returns the fork data even when err is an *AcceptedError
 	// (GitHub responds 202 to indicate the fork is being created).
-	fork, _, forkErr := c.client.Repositories.CreateFork(c.ctx, owner, repo, nil)
-	if forkErr != nil {
-		if _, ok := forkErr.(*github.AcceptedError); !ok {
-			// If the fork already exists, fetch it from the authenticated user's account.
-			if er, ok := forkErr.(*github.ErrorResponse); ok && er.Response != nil && er.Response.StatusCode == 422 {
-				me, _, uerr := c.client.Users.Get(c.ctx, "")
-				if uerr != nil {
-					return "", "", fmt.Errorf("fork already exists but could not determine current user: %w", uerr)
-				}
-				fork, _, forkErr = c.client.Repositories.Get(c.ctx, me.GetLogin(), repo)
-			}
-			if forkErr != nil {
-				return "", "", fmt.Errorf("fork: original branch error: %v, fork error: %v", createErr, forkErr)
-			}
+	fork, _, forkErr := c.client.Repositories.CreateFork(context.Background(), owner, repo, nil)
+	if forkErr != nil && !isAcceptedError(forkErr) {
+		fork, forkErr = c.resolveForkAlreadyExists(repo, fork, forkErr)
+		if forkErr != nil {
+			return "", "", fmt.Errorf("fork: original branch error: %w (fork error: %w)", createErr, forkErr)
 		}
-		// AcceptedError is expected; fork data is still populated.
 	}
 	if fork == nil {
-		return "", "", fmt.Errorf("fork returned nil repository: %v", forkErr)
+		if forkErr != nil {
+			return "", "", fmt.Errorf("fork returned nil repository: %w", forkErr)
+		}
+		return "", "", errors.New("fork returned nil repository")
 	}
 
 	forkOwner := fork.GetOwner().GetLogin()
@@ -264,7 +239,7 @@ func (c *checker) ensureBranch(owner, repo, baseBranch string) (string, string, 
 	var forkRef *github.Reference
 	deadline := time.Now().Add(12 * forkWaitDuration) // ~1 minute
 	for {
-		forkRef, _, err = c.client.Git.GetRef(c.ctx, forkOwner, forkRepo, "refs/heads/"+baseBranch)
+		forkRef, _, err = c.client.Git.GetRef(context.Background(), forkOwner, forkRepo, "refs/heads/"+baseBranch)
 		if err == nil {
 			break
 		}
@@ -274,7 +249,7 @@ func (c *checker) ensureBranch(owner, repo, baseBranch string) (string, string, 
 		time.Sleep(forkWaitDuration)
 	}
 
-	_, _, err = c.client.Git.CreateRef(c.ctx, forkOwner, forkRepo, &github.Reference{
+	_, _, err = c.client.Git.CreateRef(context.Background(), forkOwner, forkRepo, &github.Reference{
 		Ref:    github.Ptr("refs/heads/" + c.branch),
 		Object: &github.GitObject{SHA: forkRef.Object.SHA},
 	})
@@ -283,6 +258,31 @@ func (c *checker) ensureBranch(owner, repo, baseBranch string) (string, string, 
 	}
 
 	return forkOwner, forkRepo, nil
+}
+
+func isAcceptedError(err error) bool {
+	var acceptedErr *github.AcceptedError
+	return errors.As(err, &acceptedErr)
+}
+
+func (c *checker) resolveForkAlreadyExists(
+	repo string,
+	fork *github.Repository,
+	forkErr error,
+) (*github.Repository, error) {
+	var forkErrResp *github.ErrorResponse
+	if !errors.As(forkErr, &forkErrResp) ||
+		forkErrResp.Response == nil ||
+		forkErrResp.Response.StatusCode != http.StatusUnprocessableEntity {
+		return fork, forkErr
+	}
+
+	me, _, uerr := c.client.Users.Get(context.Background(), "")
+	if uerr != nil {
+		return nil, fmt.Errorf("fork already exists but could not determine current user: %w", uerr)
+	}
+	fork, _, forkErr = c.client.Repositories.Get(context.Background(), me.GetLogin(), repo)
+	return fork, forkErr
 }
 
 // checkOwner lists all public repos for the given GitHub user or organization
@@ -310,7 +310,7 @@ func (c *checker) listPublicRepos(ownerOrUser string) ([]*github.Repository, err
 		ListOptions: github.ListOptions{PerPage: 100},
 	}
 	for {
-		repos, resp, err := c.client.Repositories.ListByOrg(c.ctx, ownerOrUser, orgOpts)
+		repos, resp, err := c.client.Repositories.ListByOrg(context.Background(), ownerOrUser, orgOpts)
 		if err == nil {
 			all = append(all, repos...)
 			if resp.NextPage == 0 {
@@ -320,7 +320,7 @@ func (c *checker) listPublicRepos(ownerOrUser string) ([]*github.Repository, err
 			continue
 		}
 		// 404 means it is not an org; fall through to user lookup.
-		if resp != nil && resp.StatusCode == 404 {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
 			break
 		}
 		return nil, fmt.Errorf("listing org repos: %w", err)
@@ -333,7 +333,7 @@ func (c *checker) listPublicRepos(ownerOrUser string) ([]*github.Repository, err
 		ListOptions: github.ListOptions{PerPage: 100},
 	}
 	for {
-		repos, resp, err := c.client.Repositories.ListByUser(c.ctx, ownerOrUser, userOpts)
+		repos, resp, err := c.client.Repositories.ListByUser(context.Background(), ownerOrUser, userOpts)
 		if err != nil {
 			return nil, fmt.Errorf("listing user repos: %w", err)
 		}
@@ -416,12 +416,11 @@ func main() {
 
 	token := githubToken(tokenFlag)
 
-	ctx := context.Background()
 	var client *github.Client
 
 	if token != "" {
 		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-		tc := oauth2.NewClient(ctx, ts)
+		tc := oauth2.NewClient(context.Background(), ts)
 		client = github.NewClient(tc)
 	} else {
 		client = github.NewClient(nil)
@@ -429,7 +428,6 @@ func main() {
 	}
 
 	ch := &checker{
-		ctx:        ctx,
 		client:     client,
 		copyrights: copyrights,
 		fix:        fix,
@@ -437,7 +435,7 @@ func main() {
 	}
 
 	target := args[0]
-	if idx := strings.IndexByte(target, '/'); idx >= 0 {
+	if strings.Contains(target, "/") {
 		parts := strings.SplitN(target, "/", 2)
 		ch.checkRepo(parts[0], parts[1])
 	} else {
