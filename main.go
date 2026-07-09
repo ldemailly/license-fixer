@@ -1,3 +1,23 @@
+// license-fixer checks Apache LICENSE files in GitHub repositories and
+// optionally fixes the unfilled copyright placeholder.
+//
+// Usage:
+//
+//	license-fixer [flags] <owner/repo|owner|org>
+//
+// The target can be a single repository ("owner/repo"), a GitHub user, or
+// an organization. When given a user or org, all public repositories are
+// checked.
+//
+// Flags:
+//
+//	-c <copyright>    Copyright line to use for fix (repeatable).
+//	                  Example: -c "2025 Fortio Authors"
+//	-fix              Apply the fix by opening a PR.
+//	-branch <name>    Branch name for the fix (default: fix-license-copyright).
+//	-token <token>    GitHub personal access token.
+//	                  Defaults to GH_TOKEN or GITHUB_TOKEN env vars, or
+//	                  the output of `gh auth token`.
 package main
 
 import (
