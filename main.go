@@ -218,10 +218,10 @@ func (c *checker) ensureBranch(owner, repo, baseBranch string) (string, string, 
 	// CreateFork returns the fork data even when err is an *AcceptedError
 	// (GitHub responds 202 to indicate the fork is being created).
 	fork, _, forkErr := c.client.Repositories.CreateFork(context.Background(), owner, repo, nil)
-	if forkErr != nil && !isAcceptedError(forkErr) {
-		fork, forkErr = c.resolveForkAlreadyExists(repo, fork, forkErr)
+	if forkErr != nil && !isGitHubAcceptedError(forkErr) {
+		fork, forkErr = c.resolveForkError(repo, fork, forkErr)
 		if forkErr != nil {
-			return "", "", fmt.Errorf("fork: %w", errors.Join(createErr, forkErr))
+			return "", "", fmt.Errorf("failed to create or retrieve fork: %w", errors.Join(createErr, forkErr))
 		}
 	}
 	if fork == nil {
@@ -260,12 +260,12 @@ func (c *checker) ensureBranch(owner, repo, baseBranch string) (string, string, 
 	return forkOwner, forkRepo, nil
 }
 
-func isAcceptedError(err error) bool {
+func isGitHubAcceptedError(err error) bool {
 	var acceptedErr *github.AcceptedError
 	return errors.As(err, &acceptedErr)
 }
 
-func (c *checker) resolveForkAlreadyExists(
+func (c *checker) resolveForkError(
 	repo string,
 	fork *github.Repository,
 	forkErr error,
