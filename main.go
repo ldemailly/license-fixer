@@ -221,14 +221,14 @@ func (c *checker) ensureBranch(owner, repo, baseBranch string) (string, string, 
 	if forkErr != nil && !isAcceptedError(forkErr) {
 		fork, forkErr = c.resolveForkAlreadyExists(repo, fork, forkErr)
 		if forkErr != nil {
-			return "", "", fmt.Errorf("fork: original branch error: %w (fork error: %w)", createErr, forkErr)
+			return "", "", fmt.Errorf("fork: %w", errors.Join(createErr, forkErr))
 		}
 	}
 	if fork == nil {
 		if forkErr != nil {
-			return "", "", fmt.Errorf("fork returned nil repository: %w", forkErr)
+			return "", "", fmt.Errorf("failed to create fork: %w", forkErr)
 		}
-		return "", "", errors.New("fork returned nil repository")
+		return "", "", errors.New("fork creation returned nil repository without error")
 	}
 
 	forkOwner := fork.GetOwner().GetLogin()
@@ -435,9 +435,9 @@ func main() {
 	}
 
 	target := args[0]
-	if strings.Contains(target, "/") {
-		parts := strings.SplitN(target, "/", 2)
-		ch.checkRepo(parts[0], parts[1])
+	owner, repo, found := strings.Cut(target, "/")
+	if found {
+		ch.checkRepo(owner, repo)
 	} else {
 		ch.checkOwner(target)
 	}
