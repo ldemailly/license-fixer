@@ -228,7 +228,17 @@ func (c *checker) ensureBranch(owner, repo, baseBranch string) (string, string, 
 	fork, _, forkErr := c.client.Repositories.CreateFork(c.ctx, owner, repo, nil)
 	if forkErr != nil {
 		if _, ok := forkErr.(*github.AcceptedError); !ok {
-			return "", "", fmt.Errorf("fork: original branch error: %v, fork error: %v", createErr, forkErr)
+			// If the fork already exists, fetch it from the authenticated user's account.
+			if er, ok := forkErr.(*github.ErrorResponse); ok && er.Response != nil && er.Response.StatusCode == 422 {
+				me, _, uerr := c.client.Users.Get(c.ctx, "")
+				if uerr != nil {
+					return "", "", fmt.Errorf("fork already exists but could not determine current user: %w", uerr)
+				}
+				fork, _, forkErr = c.client.Repositories.Get(c.ctx, me.GetLogin(), repo)
+			}
+			if forkErr != nil {
+				return "", "", fmt.Errorf("fork: original branch error: %v, fork error: %v", createErr, forkErr)
+			}
 		}
 		// AcceptedError is expected; fork data is still populated.
 	}
