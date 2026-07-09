@@ -239,13 +239,19 @@ func (c *checker) ensureBranch(owner, repo, baseBranch string) (string, string, 
 	forkOwner := fork.GetOwner().GetLogin()
 	forkRepo := fork.GetName()
 
-	// GitHub needs a moment to fully initialize the fork.
+	// GitHub may take some time to fully initialize the fork; poll for the base branch ref.
 	fmt.Printf("  Waiting for fork %s/%s to be ready...\n", forkOwner, forkRepo)
-	time.Sleep(forkWaitDuration)
-
-	forkRef, _, err := c.client.Git.GetRef(c.ctx, forkOwner, forkRepo, "refs/heads/"+baseBranch)
-	if err != nil {
-		return "", "", fmt.Errorf("getting fork base branch ref (fork may not be ready): %w", err)
+	var forkRef *github.Reference
+	deadline := time.Now().Add(12 * forkWaitDuration) // ~1 minute
+	for {
+		forkRef, _, err = c.client.Git.GetRef(c.ctx, forkOwner, forkRepo, "refs/heads/"+baseBranch)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			return "", "", fmt.Errorf("getting fork base branch ref (fork may not be ready): %w", err)
+		}
+		time.Sleep(forkWaitDuration)
 	}
 
 	_, _, err = c.client.Git.CreateRef(c.ctx, forkOwner, forkRepo, &github.Reference{
