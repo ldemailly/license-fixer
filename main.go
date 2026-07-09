@@ -259,7 +259,7 @@ func (c *checker) ensureBranch(owner, repo, baseBranch string) (string, string, 
 	return forkOwner, forkRepo, nil
 }
 
-// checkOwner lists all public repos for the given GitHub user or organisation
+// checkOwner lists all public repos for the given GitHub user or organization
 // and calls checkRepo for each one.
 func (c *checker) checkOwner(ownerOrUser string) {
 	repos, err := c.listPublicRepos(ownerOrUser)
@@ -278,7 +278,7 @@ func (c *checker) checkOwner(ownerOrUser string) {
 func (c *checker) listPublicRepos(ownerOrUser string) ([]*github.Repository, error) {
 	var all []*github.Repository
 
-	// Try as an organisation first.
+	// Try as an organization first.
 	orgOpts := &github.RepositoryListByOrgOptions{
 		Type:        "public",
 		ListOptions: github.ListOptions{PerPage: 100},
