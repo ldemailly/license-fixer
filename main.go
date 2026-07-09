@@ -261,8 +261,8 @@ func (c *checker) ensureBranch(owner, repo, baseBranch string) (string, string, 
 }
 
 func isGitHubAcceptedError(err error) bool {
-	var acceptedErr *github.AcceptedError
-	return errors.As(err, &acceptedErr)
+	var acceptedErrType *github.AcceptedError
+	return errors.As(err, &acceptedErrType)
 }
 
 func (c *checker) resolveForkError(
@@ -284,7 +284,7 @@ func (c *checker) resolveForkError(
 	if forkErr != nil {
 		return nil, fmt.Errorf("getting fork from user: %w", forkErr)
 	}
-	return fork, forkErr
+	return fork, nil
 }
 
 // checkOwner lists all public repos for the given GitHub user or organization
