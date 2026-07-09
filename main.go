@@ -219,7 +219,7 @@ func (c *checker) ensureBranch(owner, repo, baseBranch string) (string, string, 
 	// (GitHub responds 202 to indicate the fork is being created).
 	fork, _, forkErr := c.client.Repositories.CreateFork(context.Background(), owner, repo, nil)
 	if forkErr != nil && !isGitHubAcceptedError(forkErr) {
-		fork, forkErr = c.resolveForkError(repo, fork, forkErr)
+		fork, forkErr = c.resolveForkError(repo, forkErr)
 		if forkErr != nil {
 			return "", "", fmt.Errorf("failed to create or retrieve fork: %w", errors.Join(createErr, forkErr))
 		}
@@ -267,21 +267,20 @@ func isGitHubAcceptedError(err error) bool {
 
 func (c *checker) resolveForkError(
 	repo string,
-	fork *github.Repository,
 	forkErr error,
 ) (*github.Repository, error) {
 	var forkErrResp *github.ErrorResponse
 	if !errors.As(forkErr, &forkErrResp) ||
 		forkErrResp.Response == nil ||
 		forkErrResp.Response.StatusCode != http.StatusUnprocessableEntity {
-		return fork, forkErr
+		return nil, forkErr
 	}
 
 	me, _, uerr := c.client.Users.Get(context.Background(), "")
 	if uerr != nil {
 		return nil, fmt.Errorf("fork already exists but could not determine current user: %w", uerr)
 	}
-	fork, _, forkErr = c.client.Repositories.Get(context.Background(), me.GetLogin(), repo)
+	fork, _, forkErr := c.client.Repositories.Get(context.Background(), me.GetLogin(), repo)
 	return fork, forkErr
 }
 
